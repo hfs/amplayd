@@ -1,0 +1,14 @@
+FIND_PATH( GLIB_config_INCLUDE_PATH glibconfig.h /usr/lib/glib-2.0/include /usr/local/lib/glib-2.0/include )
+FIND_PATH( GLIB_INCLUDE_PATH glib.h /usr/include/glib-2.0 /usr/local/include/glib-2.0 )
+SET( GLIB_INCLUDE_DIR ${GLIB_config_INCLUDE_PATH} ${GLIB_INCLUDE_PATH} )
+
+FIND_PATH(BLIB_INCLUDE_DIR blib/blib.h /usr/include/blib-1.1 /usr/local/include/blib-1.1)
+FIND_LIBRARY(BLIB_LIBRARY b)
+
+CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/config.h.in ${CMAKE_CURRENT_BINARY_DIR}/config.h)
+
+ADD_EXECUTABLE(amplayd amplayd.c playlist.c)
+INCLUDE_DIRECTORIES( ${BLIB_INCLUDE_DIR} ${GLIB_INCLUDE_DIR} ${CMAKE_CURRENT_BINARY_DIR} )
+TARGET_LINK_LIBRARIES(amplayd ${BLIB_LIBRARY})
+
+INSTALL(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/amplayd DESTINATION bin)

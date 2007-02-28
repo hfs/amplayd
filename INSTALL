@@ -1,0 +1,38 @@
+amplayd - Daemon to play movies on an ARCADEmini
+
+
+1. Dependencies
+
+   • GLib 2.0. Install the development package (called libglib2.0-dev or
+     similar) by the means of your distribution.
+   • blib - the blinkenlights library. Download from
+     [ http://freshmeat.net/projects/blib/ ] and follow their installation
+     instructions.
+   • cmake. Should come with your distribution, else get it from
+     [ http://www.cmake.org ]
+
+2. Build
+
+   $ mkdir build
+   $ cd build/
+   $ cmake ..
+   $ make
+
+3. Debug Build
+
+   To create a build with debug information run
+
+   $ mkdir build
+   $ cd build/
+   $ cmake -DCMAKE_BUILD_TYPE=debug ..
+   $ make
+
+4. Test
+
+   To test the application: Put some .bmls into /var/spool/blinken
+
+   # mknod /dev/am_usb p
+   # netcat -u localhost 2323 < /dev/am_usb
+   # blinkensim [theme]
+   # ./amplayd
+
