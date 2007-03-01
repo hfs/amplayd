@@ -21,9 +21,11 @@
 #include <blib/blib.h>
 #include <errno.h>
 #include <libdaemon/daemon.h>
+#include <pwd.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 #include "config.h"
@@ -36,6 +38,7 @@
 static void daemonize( char* name ){
 	pid_t pid;
 
+  /* process' name */
 	daemon_pid_file_ident = daemon_log_ident = daemon_ident_from_argv0(name);
 
 	if ( ( pid = daemon_pid_file_is_running() ) >= 0 ) {
@@ -43,6 +46,7 @@ static void daemonize( char* name ){
 		exit( EXIT_FAILURE );
 	}
 
+  /* fork(), detach from stdin/out/err, set new group, set working dir */
 	if ( ( pid = daemon_fork() ) < 0 ) {
 		daemon_log( LOG_ERR, "Fork failed.\n");
 		exit( EXIT_FAILURE );
@@ -63,6 +67,7 @@ static void usage( const char* name ){
 	g_printerr( "Options:\n" );
 	g_printerr( "\t-d\t\tDebug mode (non-daemon mode).\n" );
 	g_printerr( "\t-h\t\tPrints this help information.\n" );
+  g_printerr( "\t-u user\t\tDrop privileges to the specified user.\n" );
 	g_printerr( "\t-V\t\tPrints the daemons version.\n" );
 	g_printerr( "\n" );
 }
@@ -76,7 +81,8 @@ void signal_handler(int sig) {
 		case SIGTERM:
 		case SIGINT:
 		case SIGQUIT:
-			daemon_pid_file_remove();
+			if (daemon_pid_file_remove() == -1)
+        daemon_log(LOG_ERR, "Could not remove pid file (%s).\n", strerror(errno));;
 			exit( EXIT_SUCCESS );
 	}
 }
@@ -118,8 +124,9 @@ int main( int argc, char *argv[] ){
 	GIOStatus status;
 	int c;
 	char daemonized = 1;
+  struct passwd * user = NULL;
 
-	while ( ( c = getopt( argc, argv, "dhV" ) ) != -1 ) {
+	while ( ( c = getopt( argc, argv, "dhu:V" ) ) != -1 ) {
 		switch (c) {
 			case 'd':
 				daemonized = 0;
@@ -128,31 +135,40 @@ int main( int argc, char *argv[] ){
 				usage( argv[0] );
 				exit( EXIT_SUCCESS );
 				break;
+      case 'u':
+        errno = 0;
+        if ( ( user = getpwnam(optarg) ) == NULL ){
+          g_printerr( "Could not find user '%s' %s\n", optarg, ( errno == 0 ) ? "" : strerror( errno ) );
+          exit( EXIT_FAILURE );
+        }
+        break;
 			case 'V':
 				version();
 				exit( EXIT_SUCCESS );
 		}
 	}
 
-	if ( daemonized ) {
+	if ( daemonized ){
 		daemonize( argv[0] );
-		signal(SIGPIPE, SIG_IGN);
-		signal(SIGTERM, signal_handler);
-		signal(SIGINT, signal_handler);
-		signal(SIGQUIT, signal_handler);
+		signal( SIGPIPE, SIG_IGN );
+		signal( SIGTERM, signal_handler );
+		signal( SIGINT, signal_handler );
+		signal( SIGQUIT, signal_handler );
 	}
 
 	b_init();
 
+
 	playlist = playlist_new( AMPLAYD_PLAYLISTDIR, &error );
 	if( !playlist ){
-		g_printerr( "Error loading playlist directory '%s': %s\n", AMPLAYD_PLAYLISTDIR, error->message );
+		daemon_log(LOG_ERR, "Error loading playlist directory '%s': %s\n", 
+        AMPLAYD_PLAYLISTDIR, error->message );
 		g_clear_error( &error );
 		exit( EXIT_FAILURE );
 	}
 	GIOChannel *am_dev = g_io_channel_new_file( AMPLAYD_DEVICE, "w", &error );
 	if( !am_dev ){
-		g_printerr( "Error opening device '%s': %s\n",
+		daemon_log(LOG_ERR, "Error opening device '%s': %s\n",
         AMPLAYD_DEVICE,
 				error->message );
 		g_clear_error( &error );
@@ -160,24 +176,33 @@ int main( int argc, char *argv[] ){
 	  exit( EXIT_FAILURE );
 	}
 	if( g_io_channel_set_encoding( am_dev, NULL, &error ) != G_IO_STATUS_NORMAL ){
-		g_printerr( "Can't enable binary mode: %s\n", error->message );
+		daemon_log(LOG_ERR, "Can't enable binary mode: %s\n", error->message );
 		g_clear_error( &error );
 		playlist_free( playlist );
 		exit( EXIT_FAILURE );
 	}
 
+  /* drop priviledges */
+  if ( user != NULL ){
+    if ( setuid( user->pw_uid ) == -1 ){
+      daemon_log( LOG_ERR, "Could not set uid '%i': %s\n", user->pw_uid, strerror( errno ) );
+      exit( EXIT_FAILURE );
+    } else {
+      daemon_log( LOG_INFO, "Dropping priviledges to uid '%i' (%s)\n", user->pw_uid, user->pw_name );
+    }
+  } 
 
 	while( TRUE ){
-		g_debug( "next: " );
+		daemon_log(LOG_DEBUG, "next: " );
 		file = g_strconcat( AMPLAYD_PLAYLISTDIR "/", playlist_next( playlist ),
 				NULL );
-		g_debug( "%s\n", file );
+		daemon_log(LOG_DEBUG, "%s\n", file );
 		if( !file ){
 			break;
 		}
 		movie = b_movie_new_from_file( file, FALSE, &error );
 		if( !movie ){
-			g_printerr( "Error loading '%s': %s\n", file, error->message );
+			daemon_log(LOG_ERR, "Error loading '%s': %s\n", file, error->message );
 			g_clear_error( &error );
 			continue;
 		}
