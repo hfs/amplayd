@@ -1,0 +1,24 @@
+Source: amplayd
+Section: misc
+Priority: extra
+Maintainer: Hermann Schwarting <debian@knackich.de>
+Build-Depends: debhelper (>= 5), cmake (>= 2.4), libblib-dev, libglib2.0-dev,
+ libdaemon-dev
+Standards-Version: 3.7.2
+
+Package: amplayd
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Daemon to play movies on an ARCADEmini
+ Blinkenlights Arcade was a light installation at the
+ Bibliothèque nationale de France in Paris in 2002, realized
+ by the Chaos Computer Club. See
+ http://www.blinkenlights.de/arcade/index.en.html
+ .
+ ARCADEmini is a custom hardware project to create small
+ replicas of the installation using LEDs. See
+ http://arcademini.schuermans.info/
+ .
+ The amplayd plays animations on this hardware in standalone
+ operation. This package is only useful if you have such a
+ device.

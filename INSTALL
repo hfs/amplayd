@@ -27,7 +27,13 @@ amplayd - Daemon to play movies on an ARCADEmini
    $ cmake -DCMAKE_BUILD_TYPE=debug ..
    $ make
 
-4. Test
+4. Debian Package
+
+   To build a .deb package
+
+   $ dpkg-buildpackage -us -uc -rfakeroot
+
+5. Test
 
    To test the application: Put some .bmls into /var/spool/blinken
 

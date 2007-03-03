@@ -38,17 +38,19 @@
 static void daemonize( char* name ){
 	pid_t pid;
 
-  /* process' name */
+	/* process' name */
 	daemon_pid_file_ident = daemon_log_ident = daemon_ident_from_argv0(name);
+	daemon_log_use = DAEMON_LOG_AUTO;
 
-	if ( ( pid = daemon_pid_file_is_running() ) >= 0 ) {
-		daemon_log( LOG_ERR, "%s is already running as PID %u.\n", AMPLAYD_NAME, pid);
+	if(( pid = daemon_pid_file_is_running() ) >= 0 ){
+		daemon_log( LOG_ERR, "%s is already running as PID %u.\n",
+				AMPLAYD_NAME, pid );
 		exit( EXIT_FAILURE );
 	}
 
-  /* fork(), detach from stdin/out/err, set new group, set working dir */
-	if ( ( pid = daemon_fork() ) < 0 ) {
-		daemon_log( LOG_ERR, "Fork failed.\n");
+	/* fork(), detach from stdin/out/err, set new group, set working dir */
+	if(( pid = daemon_fork() ) < 0 ){
+		daemon_log( LOG_ERR, "Fork failed.\n" );
 		exit( EXIT_FAILURE );
 	} else if ( pid ) { // parent
 		exit( EXIT_SUCCESS );
@@ -57,23 +59,25 @@ static void daemonize( char* name ){
 			daemon_log( LOG_ERR, "Could not create PID file (%s).\n", strerror(errno));
 			exit( EXIT_FAILURE );
 		}
+		/* TODO chown pid file if dropping priv’s */
 	}
 }
 
 static void usage( const char* name ){
 	g_printerr( "%s - Daemon to play movies on an ARCADEmini\n", AMPLAYD_NAME );
-	g_printerr( "Usage: %s [OPTIONS] <filename>\n", name );
+	g_printerr( "Usage: %s [OPTIONS]\n", name );
 	g_printerr( "\n" );
 	g_printerr( "Options:\n" );
 	g_printerr( "\t-d\t\tDebug mode (non-daemon mode).\n" );
 	g_printerr( "\t-h\t\tPrints this help information.\n" );
-  g_printerr( "\t-u user\t\tDrop privileges to the specified user.\n" );
+	g_printerr( "\t-u user\t\tDrop privileges to the specified user.\n" );
 	g_printerr( "\t-V\t\tPrints the daemons version.\n" );
 	g_printerr( "\n" );
 }
 
 static void version(){
-	g_printerr( "%s version %d.%d.%d\n", AMPLAYD_NAME, VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH );
+	g_printerr( "%s version %d.%d.%d\n", AMPLAYD_NAME, VERSION_MAJOR,
+			VERSION_MINOR, VERSION_PATCH );
 }
 
 void signal_handler(int sig) {
@@ -81,8 +85,10 @@ void signal_handler(int sig) {
 		case SIGTERM:
 		case SIGINT:
 		case SIGQUIT:
-			if (daemon_pid_file_remove() == -1)
-        daemon_log(LOG_ERR, "Could not remove pid file (%s).\n", strerror(errno));;
+			if (daemon_pid_file_remove() == -1) {
+				daemon_log(LOG_ERR, "Could not remove pid file (%s).\n",
+						strerror(errno));
+			}
 			exit( EXIT_SUCCESS );
 	}
 }
@@ -123,32 +129,35 @@ int main( int argc, char *argv[] ){
 	const gchar *file = NULL;
 	GIOStatus status;
 	int c;
-	char daemonized = 1;
-  struct passwd * user = NULL;
+	struct passwd * user = NULL;
+	gboolean daemonized = TRUE;
 
-	while ( ( c = getopt( argc, argv, "dhu:V" ) ) != -1 ) {
+	/* TODO getopt_long? */
+	while (( c = getopt( argc, argv, "dhu:V" )) != -1 ){
 		switch (c) {
 			case 'd':
-				daemonized = 0;
+				daemonized = FALSE;
 				break;
 			case 'h':
 				usage( argv[0] );
 				exit( EXIT_SUCCESS );
 				break;
-      case 'u':
-        errno = 0;
-        if ( ( user = getpwnam(optarg) ) == NULL ){
-          g_printerr( "Could not find user '%s' %s\n", optarg, ( errno == 0 ) ? "" : strerror( errno ) );
-          exit( EXIT_FAILURE );
-        }
-        break;
+			case 'u':
+				errno = 0;
+				if(( user = getpwnam(optarg)) == NULL ){
+					g_printerr( "Could not find user '%s' %s\n",
+							optarg,
+							( errno == 0 ) ? "" : strerror( errno ) );
+					exit( EXIT_FAILURE );
+				}
+				break;
 			case 'V':
 				version();
 				exit( EXIT_SUCCESS );
 		}
 	}
 
-	if ( daemonized ){
+	if( daemonized ){
 		daemonize( argv[0] );
 		signal( SIGPIPE, SIG_IGN );
 		signal( SIGTERM, signal_handler );
@@ -156,24 +165,36 @@ int main( int argc, char *argv[] ){
 		signal( SIGQUIT, signal_handler );
 	}
 
+	/* drop privileges */
+	if( user != NULL ){
+		if( setuid( user->pw_uid ) == -1 ){
+			daemon_log( LOG_ERR, "Could not set uid '%i': %s\n",
+					user->pw_uid, strerror( errno ));
+			exit( EXIT_FAILURE );
+		} else {
+			daemon_log( LOG_INFO, "Dropping privileges to uid '%i' (%s)\n",
+					user->pw_uid, user->pw_name );
+		}
+	} 
+
 	b_init();
 
-
+	/* Open playlist and output device */
 	playlist = playlist_new( AMPLAYD_PLAYLISTDIR, &error );
 	if( !playlist ){
 		daemon_log(LOG_ERR, "Error loading playlist directory '%s': %s\n", 
-        AMPLAYD_PLAYLISTDIR, error->message );
+				AMPLAYD_PLAYLISTDIR, error->message );
 		g_clear_error( &error );
 		exit( EXIT_FAILURE );
 	}
+	/* TODO do not create a new file if the device doesn’t exist yet */
 	GIOChannel *am_dev = g_io_channel_new_file( AMPLAYD_DEVICE, "w", &error );
 	if( !am_dev ){
 		daemon_log(LOG_ERR, "Error opening device '%s': %s\n",
-        AMPLAYD_DEVICE,
-				error->message );
+				AMPLAYD_DEVICE, error->message );
 		g_clear_error( &error );
 		playlist_free( playlist );
-	  exit( EXIT_FAILURE );
+		exit( EXIT_FAILURE );
 	}
 	if( g_io_channel_set_encoding( am_dev, NULL, &error ) != G_IO_STATUS_NORMAL ){
 		daemon_log(LOG_ERR, "Can't enable binary mode: %s\n", error->message );
@@ -182,32 +203,31 @@ int main( int argc, char *argv[] ){
 		exit( EXIT_FAILURE );
 	}
 
-  /* drop priviledges */
-  if ( user != NULL ){
-    if ( setuid( user->pw_uid ) == -1 ){
-      daemon_log( LOG_ERR, "Could not set uid '%i': %s\n", user->pw_uid, strerror( errno ) );
-      exit( EXIT_FAILURE );
-    } else {
-      daemon_log( LOG_INFO, "Dropping priviledges to uid '%i' (%s)\n", user->pw_uid, user->pw_name );
-    }
-  } 
-
+	/* Main Loop */
 	while( TRUE ){
-		daemon_log(LOG_DEBUG, "next: " );
 		file = g_strconcat( AMPLAYD_PLAYLISTDIR "/", playlist_next( playlist ),
 				NULL );
 		daemon_log(LOG_DEBUG, "%s\n", file );
+		/* TODO playlist_next returns NULL -> playlist is empty
+		 * Should give one log message and poll playlist directory
+		 * gently, i.e. every 10 sec
+		 */
 		if( !file ){
 			break;
 		}
 		movie = b_movie_new_from_file( file, FALSE, &error );
 		if( !movie ){
-			daemon_log(LOG_ERR, "Error loading '%s': %s\n", file, error->message );
+			daemon_log(LOG_ERR, "Error loading '%s': %s\n",
+					file, error->message );
 			g_clear_error( &error );
 			continue;
 		}
 
 		play_movie( am_dev, movie, &error );
+		/* TODO Check return value
+		 * Decide if this makes sense: Check if the device is gone and
+		 * reopen if necessary.
+		 */
 	}
 	exit( EXIT_FAILURE );
 }
