@@ -1,0 +1,40 @@
+.\" Process this file with
+.\" groff -man -Tascii amplayd.1
+.\"
+.TH amplayd 8 "upLUG - Linux User Group Potsdam" "2007" "ARCADEmini"
+.SH NAME
+amplayd \- Daemon to play movies on an ARCADEmini
+.SH SYNOPSIS
+.B amplayd [ -u
+.I user
+.B ] [ -d ] [ -h ] [ -V ]
+.SH DESCRIPTION
+This program is a standalone daemon to play animations on an ARCADEmini, a
+small scale replica of the Blinkenlights Arcade light installation.
+.SH OPTIONS
+.IP "-u user"
+Drop privileges to
+.I user
+.IP -d
+Debug and don't run in the background
+.IP -h
+Print short help information
+.IP -V
+Print the daemon's version and exit
+.SH FILES
+.I /dev/am_usb
+.RS
+The device special file of the ARCADEmini
+.RE
+.I /var/spool/blinken
+.RS
+The playlist directory
+.RE
+.SH BUGS
+Please report!
+.SH AUTHORS
+upLUG -- Linux User Group Potsdam.
+.I http://www.uplug.de/
+
+Hermann Schwarting,
+André Kloth

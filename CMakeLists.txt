@@ -1,5 +1,5 @@
-PROJECT(amplayd)
-SUBDIRS(src)
+PROJECT(amplayd C)
+SUBDIRS(src doc)
 
 SET(CPACK_PACKAGE_DESCRIPTION_SUMMARY "amplayd - Daemon to play movies on an ARCADEmini")
 SET(CPACK_PACKAGE_VERSION_MAJOR "0")

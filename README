@@ -1,5 +1,17 @@
 amplayd - Daemon to play movies on an ARCADEmini
 
-About Blinkenlights Arcade: http://www.blinkenlights.de/arcade/index.en.html
-About ARCADEmini: http://arcademini.schuermans.info/
+Blinkenlights Arcade was a light installation at the
+Bibliothèque nationale de France in Paris in 2002, realized
+by the Chaos Computer Club. See
+http://www.blinkenlights.de/arcade/index.en.html
+
+ARCADEmini is a custom hardware project to create small
+replicas of the installation using LEDs. See
+http://arcademini.schuermans.info/
+
+The amplayd plays animations on this hardware in standalone
+operation. This package is only useful if you have such a
+device.
+
+We use it for our installation "BlinkenKuze".
 About BlinkenKuze: http://wiki.uplug.de/index.php?page=BlinkenKUZE

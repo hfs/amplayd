@@ -20,6 +20,7 @@
 
 #include <blib/blib.h>
 #include <errno.h>
+#include <getopt.h>
 #include <libdaemon/daemon.h>
 #include <pwd.h>
 #include <signal.h>
@@ -35,6 +36,10 @@
 #define AMPLAYD_DEVICE "/dev/am_usb"
 #define AMPLAYD_PLAYLISTDIR "/var/spool/blinken"
 
+enum {
+	DAEMON_SUCCESS = 1
+};
+
 static void daemonize( char* name ){
 	pid_t pid;
 
@@ -48,18 +53,24 @@ static void daemonize( char* name ){
 		exit( EXIT_FAILURE );
 	}
 
+	daemon_retval_init();
+
 	/* fork(), detach from stdin/out/err, set new group, set working dir */
 	if(( pid = daemon_fork() ) < 0 ){
 		daemon_log( LOG_ERR, "Fork failed.\n" );
 		exit( EXIT_FAILURE );
 	} else if ( pid ) { // parent
+		if( daemon_retval_wait(1) < 0 ){
+			g_printerr( "Daemon couldn't start.\n"
+					"Please check syslog for error messages.\n" );
+			exit( EXIT_FAILURE );
+		}
 		exit( EXIT_SUCCESS );
 	} else { // daemon
 		if ( daemon_pid_file_create() < 0 ) {
 			daemon_log( LOG_ERR, "Could not create PID file (%s).\n", strerror(errno));
 			exit( EXIT_FAILURE );
 		}
-		/* TODO chown pid file if dropping priv’s */
 	}
 }
 
@@ -68,10 +79,10 @@ static void usage( const char* name ){
 	g_printerr( "Usage: %s [OPTIONS]\n", name );
 	g_printerr( "\n" );
 	g_printerr( "Options:\n" );
-	g_printerr( "\t-d\t\tDebug mode (non-daemon mode).\n" );
-	g_printerr( "\t-h\t\tPrints this help information.\n" );
-	g_printerr( "\t-u user\t\tDrop privileges to the specified user.\n" );
-	g_printerr( "\t-V\t\tPrints the daemons version.\n" );
+	g_printerr( "    -u --user user  Drop privileges to the specified user.\n" );
+	g_printerr( "    -d --no-daemon  Debug mode (non-daemon mode).\n" );
+	g_printerr( "    -h --help       Prints this help information.\n" );
+	g_printerr( "    -V --version    Prints the daemons version.\n" );
 	g_printerr( "\n" );
 }
 
@@ -128,13 +139,21 @@ int main( int argc, char *argv[] ){
 	Playlist *playlist = NULL;
 	const gchar *file = NULL;
 	GIOStatus status;
-	int c;
+	int o;
 	struct passwd * user = NULL;
 	gboolean daemonized = TRUE;
 
-	/* TODO getopt_long? */
-	while (( c = getopt( argc, argv, "dhu:V" )) != -1 ){
-		switch (c) {
+	/* Command line options */
+	static const struct option long_options[] = {
+		{ "help",      no_argument,       NULL, 'h' },
+		{ "version",   no_argument,       NULL, 'V' },
+		{ "no-daemon", no_argument,       NULL, 'd' },
+		{ "user",      required_argument, NULL, 'u' },
+		{ NULL, 0, NULL, 0}
+	};
+
+	while (( o = getopt_long( argc, argv, "dhu:V", long_options, NULL )) >= 0 ){
+		switch (o) {
 			case 'd':
 				daemonized = FALSE;
 				break;
@@ -154,6 +173,11 @@ int main( int argc, char *argv[] ){
 			case 'V':
 				version();
 				exit( EXIT_SUCCESS );
+				break;
+			default:
+				usage( argv[0] );
+				exit( EXIT_FAILURE );
+				break;
 		}
 	}
 
@@ -167,9 +191,15 @@ int main( int argc, char *argv[] ){
 
 	/* drop privileges */
 	if( user != NULL ){
-		if( setuid( user->pw_uid ) == -1 ){
-			daemon_log( LOG_ERR, "Could not set uid '%i': %s\n",
-					user->pw_uid, strerror( errno ));
+		if( chown( daemon_pid_file_proc(), user->pw_uid, user->pw_gid) != 0 ) {
+			daemon_log( LOG_ERR,
+					"Couldn't chown '%s' to '%s' uid=%d gid=%d\n",
+					daemon_pid_file_proc(), user->pw_name,
+					user->pw_uid, user->pw_gid );
+		}
+		if( setuid( user->pw_uid ) != 0 || setgid( user->pw_gid ) != 0 ){
+			daemon_log( LOG_ERR, "Could not set uid '%i', gid '%i': %s\n",
+					user->pw_uid, user->pw_gid, strerror( errno ));
 			exit( EXIT_FAILURE );
 		} else {
 			daemon_log( LOG_INFO, "Dropping privileges to uid '%i' (%s)\n",
@@ -187,8 +217,7 @@ int main( int argc, char *argv[] ){
 		g_clear_error( &error );
 		exit( EXIT_FAILURE );
 	}
-	/* TODO do not create a new file if the device doesn’t exist yet */
-	GIOChannel *am_dev = g_io_channel_new_file( AMPLAYD_DEVICE, "w", &error );
+	GIOChannel *am_dev = g_io_channel_new_file( AMPLAYD_DEVICE, "r+", &error );
 	if( !am_dev ){
 		daemon_log(LOG_ERR, "Error opening device '%s': %s\n",
 				AMPLAYD_DEVICE, error->message );
@@ -203,18 +232,28 @@ int main( int argc, char *argv[] ){
 		exit( EXIT_FAILURE );
 	}
 
+	/* Ok, looks good */
+	if( daemonized ){
+		daemon_retval_send( DAEMON_SUCCESS );
+	}
+
 	/* Main Loop */
+	gboolean empty_playlist_error = FALSE;
 	while( TRUE ){
-		file = g_strconcat( AMPLAYD_PLAYLISTDIR "/", playlist_next( playlist ),
-				NULL );
-		daemon_log(LOG_DEBUG, "%s\n", file );
-		/* TODO playlist_next returns NULL -> playlist is empty
-		 * Should give one log message and poll playlist directory
-		 * gently, i.e. every 10 sec
-		 */
+		file = playlist_next( playlist );
 		if( !file ){
-			break;
+			if( !empty_playlist_error ){
+				daemon_log( LOG_ERR, "Playlist is empty. Please "
+						"check " AMPLAYD_PLAYLISTDIR "\n" );
+				empty_playlist_error = TRUE;
+			}
+			sleep( 10 );
+			continue;
 		}
+		else {
+			empty_playlist_error = FALSE;
+		}
+		file = g_strconcat( AMPLAYD_PLAYLISTDIR "/", file, NULL );
 		movie = b_movie_new_from_file( file, FALSE, &error );
 		if( !movie ){
 			daemon_log(LOG_ERR, "Error loading '%s': %s\n",
