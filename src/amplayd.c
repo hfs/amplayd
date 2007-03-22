@@ -32,10 +32,6 @@
 #include "config.h"
 #include "playlist.h"
 
-#define AMPLAYD_NAME "amplayd"
-#define AMPLAYD_DEVICE "/dev/am_usb"
-#define AMPLAYD_PLAYLISTDIR "/var/spool/blinken"
-
 enum {
 	DAEMON_SUCCESS = 1
 };
@@ -44,7 +40,7 @@ static void daemonize( char* name ){
 	pid_t pid;
 
 	/* process' name */
-	daemon_pid_file_ident = daemon_log_ident = daemon_ident_from_argv0(name);
+	daemon_pid_file_ident = daemon_log_ident = daemon_ident_from_argv0( name );
 	daemon_log_use = DAEMON_LOG_AUTO;
 
 	if(( pid = daemon_pid_file_is_running() ) >= 0 ){
@@ -68,7 +64,8 @@ static void daemonize( char* name ){
 		exit( EXIT_SUCCESS );
 	} else { // daemon
 		if ( daemon_pid_file_create() < 0 ) {
-			daemon_log( LOG_ERR, "Could not create PID file (%s).\n", strerror(errno));
+			daemon_log( LOG_ERR, "Could not create PID file (%s).\n",
+					strerror( errno ));
 			exit( EXIT_FAILURE );
 		}
 	}
@@ -79,10 +76,12 @@ static void usage( const char* name ){
 	g_printerr( "Usage: %s [OPTIONS]\n", name );
 	g_printerr( "\n" );
 	g_printerr( "Options:\n" );
-	g_printerr( "    -u --user user  Drop privileges to the specified user.\n" );
-	g_printerr( "    -d --no-daemon  Debug mode (non-daemon mode).\n" );
-	g_printerr( "    -h --help       Prints this help information.\n" );
-	g_printerr( "    -V --version    Prints the daemons version.\n" );
+	g_printerr( "    -u --user user      Drop privileges to the specified user.\n" );
+	g_printerr( "    -d --device device  Device of the ARCADEmini (default: " AMPLAYD_DEVICE ")\n" );
+	g_printerr( "    -s --spool-dir dir  Playlist directory (default: " AMPLAYD_PLAYLISTDIR ")\n" );
+	g_printerr( "    -f --foreground     Debug mode (run in foreground).\n" );
+	g_printerr( "    -h --help           Prints this help information.\n" );
+	g_printerr( "    -V --version        Prints the daemons version.\n" );
 	g_printerr( "\n" );
 }
 
@@ -137,29 +136,39 @@ int main( int argc, char *argv[] ){
 	BMovie *movie = NULL;
 	GError *error = NULL;
 	Playlist *playlist = NULL;
+	const gchar *device = NULL;
+	const gchar *spool_dir = NULL;
 	const gchar *file = NULL;
 	GIOStatus status;
-	int o;
-	struct passwd * user = NULL;
+	int o = -1;
+	struct passwd *user = NULL;
 	gboolean daemonized = TRUE;
 
 	/* Command line options */
 	static const struct option long_options[] = {
-		{ "help",      no_argument,       NULL, 'h' },
-		{ "version",   no_argument,       NULL, 'V' },
-		{ "no-daemon", no_argument,       NULL, 'd' },
-		{ "user",      required_argument, NULL, 'u' },
+		{ "help",       no_argument,       NULL, 'h' },
+		{ "version",    no_argument,       NULL, 'V' },
+		{ "foreground", no_argument,       NULL, 'f' },
+		{ "user",       required_argument, NULL, 'u' },
+		{ "device",     required_argument, NULL, 'd' },
+		{ "spool-dir",  required_argument, NULL, 's' },
 		{ NULL, 0, NULL, 0}
 	};
 
-	while (( o = getopt_long( argc, argv, "dhu:V", long_options, NULL )) >= 0 ){
+	while (( o = getopt_long( argc, argv, "d:fhs:u:V", long_options, NULL )) >= 0 ){
 		switch (o) {
 			case 'd':
+				device = g_strdup( optarg );
+				break;
+			case 'f':
 				daemonized = FALSE;
 				break;
 			case 'h':
 				usage( argv[0] );
 				exit( EXIT_SUCCESS );
+				break;
+			case 's':
+				spool_dir = g_strdup( optarg );
 				break;
 			case 'u':
 				errno = 0;
@@ -181,6 +190,12 @@ int main( int argc, char *argv[] ){
 		}
 	}
 
+	if( !device ){
+		device = AMPLAYD_DEVICE;
+	}
+	if( !spool_dir ){
+		spool_dir = AMPLAYD_PLAYLISTDIR;
+	}
 	if( daemonized ){
 		daemonize( argv[0] );
 		signal( SIGPIPE, SIG_IGN );
@@ -197,7 +212,7 @@ int main( int argc, char *argv[] ){
 					daemon_pid_file_proc(), user->pw_name,
 					user->pw_uid, user->pw_gid );
 		}
-		if( setuid( user->pw_uid ) != 0 || setgid( user->pw_gid ) != 0 ){
+		if( setgid( user->pw_gid ) != 0 || setuid( user->pw_uid ) != 0 ){
 			daemon_log( LOG_ERR, "Could not set uid '%i', gid '%i': %s\n",
 					user->pw_uid, user->pw_gid, strerror( errno ));
 			exit( EXIT_FAILURE );
@@ -205,22 +220,22 @@ int main( int argc, char *argv[] ){
 			daemon_log( LOG_INFO, "Dropping privileges to uid '%i' (%s)\n",
 					user->pw_uid, user->pw_name );
 		}
-	} 
+	}
 
 	b_init();
 
 	/* Open playlist and output device */
-	playlist = playlist_new( AMPLAYD_PLAYLISTDIR, &error );
+	playlist = playlist_new( spool_dir, &error );
 	if( !playlist ){
 		daemon_log(LOG_ERR, "Error loading playlist directory '%s': %s\n", 
-				AMPLAYD_PLAYLISTDIR, error->message );
+				spool_dir, error->message );
 		g_clear_error( &error );
 		exit( EXIT_FAILURE );
 	}
-	GIOChannel *am_dev = g_io_channel_new_file( AMPLAYD_DEVICE, "r+", &error );
+	GIOChannel *am_dev = g_io_channel_new_file( device, "r+", &error );
 	if( !am_dev ){
 		daemon_log(LOG_ERR, "Error opening device '%s': %s\n",
-				AMPLAYD_DEVICE, error->message );
+				device, error->message );
 		g_clear_error( &error );
 		playlist_free( playlist );
 		exit( EXIT_FAILURE );
@@ -244,7 +259,7 @@ int main( int argc, char *argv[] ){
 		if( !file ){
 			if( !empty_playlist_error ){
 				daemon_log( LOG_ERR, "Playlist is empty. Please "
-						"check " AMPLAYD_PLAYLISTDIR "\n" );
+						"check %s\n", spool_dir );
 				empty_playlist_error = TRUE;
 			}
 			sleep( 10 );
@@ -253,7 +268,7 @@ int main( int argc, char *argv[] ){
 		else {
 			empty_playlist_error = FALSE;
 		}
-		file = g_strconcat( AMPLAYD_PLAYLISTDIR "/", file, NULL );
+		file = g_strconcat( spool_dir, "/", file, NULL );
 		movie = b_movie_new_from_file( file, FALSE, &error );
 		if( !movie ){
 			daemon_log(LOG_ERR, "Error loading '%s': %s\n",

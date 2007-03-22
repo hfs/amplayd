@@ -8,7 +8,7 @@ Standards-Version: 3.7.2
 
 Package: amplayd
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}
+Depends: ${shlibs:Depends}, ${misc:Depends}, lsb-base (>= 3.0-6)
 Description: Daemon to play movies on an ARCADEmini
  Blinkenlights Arcade was a light installation at the
  Bibliothèque nationale de France in Paris in 2002, realized

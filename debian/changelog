@@ -1,3 +1,14 @@
+amplayd (0.1.3-1) unstable; urgency=low
+
+  * Long command line options, new options -d, -s
+  * Return value indicates success
+  * Chown PID file with -u and change group, too
+  * Do not create device if it doesn’t exist
+  * Sane behavior with empty playlist
+  * Cross-compiling, man page, init script
+
+ -- Hermann Schwarting <debian@knackich.de>  Thu, 22 Mar 2007 20:49:35 +0100
+
 amplayd (0.1.2-1) unstable; urgency=low
 
   * Initial release
