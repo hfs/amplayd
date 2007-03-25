@@ -1,3 +1,11 @@
+amplayd (0.1.4-1) unstable; urgency=low
+
+  * Sane memory management
+  * Example synchronization script sync.sh
+  * Explain the playlist concept in the man page
+
+ -- Hermann Schwarting <debian@knackich.de>  Sun, 25 Mar 2007 19:56:23 +0200
+
 amplayd (0.1.3-1) unstable; urgency=low
 
   * Long command line options, new options -d, -s

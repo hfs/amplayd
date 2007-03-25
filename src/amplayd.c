@@ -36,6 +36,8 @@ enum {
 	DAEMON_SUCCESS = 1
 };
 
+static gboolean running;
+
 static void daemonize( char* name ){
 	pid_t pid;
 
@@ -90,16 +92,12 @@ static void version(){
 			VERSION_MINOR, VERSION_PATCH );
 }
 
-void signal_handler(int sig) {
+void signal_handler( int sig ){
 	switch( sig ){
 		case SIGTERM:
 		case SIGINT:
 		case SIGQUIT:
-			if (daemon_pid_file_remove() == -1) {
-				daemon_log(LOG_ERR, "Could not remove pid file (%s).\n",
-						strerror(errno));
-			}
-			exit( EXIT_SUCCESS );
+			running = FALSE;
 	}
 }
 
@@ -116,7 +114,7 @@ gboolean play_movie( GIOChannel *output, BMovie *movie, GError **error ){
 	g_return_val_if_fail( packet, FALSE );
 	b_packet_hton( packet );
 
-	for( list = movie->frames; list; list = list->next ){
+	for( list = movie->frames; list && running; list = list->next ){
 		gsize bytes_written = 0;
 		BMovieFrame *frame = list->data;
 		memcpy( packet->data, frame->data, size );
@@ -129,20 +127,22 @@ gboolean play_movie( GIOChannel *output, BMovie *movie, GError **error ){
 		nanosleep( &t, NULL );
 	}
 
+	g_free( packet );
 	return TRUE;
 }
 
 int main( int argc, char *argv[] ){
-	BMovie *movie = NULL;
 	GError *error = NULL;
+	BMovie *movie = NULL;
 	Playlist *playlist = NULL;
-	const gchar *device = NULL;
-	const gchar *spool_dir = NULL;
-	const gchar *file = NULL;
+	gchar *device = NULL;
+	gchar *spool_dir = NULL;
+	gchar *file = NULL;
 	GIOStatus status;
 	int o = -1;
 	struct passwd *user = NULL;
 	gboolean daemonized = TRUE;
+	running = TRUE;
 
 	/* Command line options */
 	static const struct option long_options[] = {
@@ -198,11 +198,12 @@ int main( int argc, char *argv[] ){
 	}
 	if( daemonized ){
 		daemonize( argv[0] );
-		signal( SIGPIPE, SIG_IGN );
-		signal( SIGTERM, signal_handler );
-		signal( SIGINT, signal_handler );
-		signal( SIGQUIT, signal_handler );
 	}
+
+	signal( SIGPIPE, SIG_IGN );
+	signal( SIGTERM, signal_handler );
+	signal( SIGINT, signal_handler );
+	signal( SIGQUIT, signal_handler );
 
 	/* drop privileges */
 	if( user != NULL ){
@@ -225,25 +226,25 @@ int main( int argc, char *argv[] ){
 	b_init();
 
 	/* Open playlist and output device */
-	playlist = playlist_new( spool_dir, &error );
-	if( !playlist ){
-		daemon_log(LOG_ERR, "Error loading playlist directory '%s': %s\n", 
-				spool_dir, error->message );
-		g_clear_error( &error );
-		exit( EXIT_FAILURE );
-	}
 	GIOChannel *am_dev = g_io_channel_new_file( device, "r+", &error );
 	if( !am_dev ){
 		daemon_log(LOG_ERR, "Error opening device '%s': %s\n",
 				device, error->message );
 		g_clear_error( &error );
-		playlist_free( playlist );
 		exit( EXIT_FAILURE );
 	}
 	if( g_io_channel_set_encoding( am_dev, NULL, &error ) != G_IO_STATUS_NORMAL ){
 		daemon_log(LOG_ERR, "Can't enable binary mode: %s\n", error->message );
 		g_clear_error( &error );
-		playlist_free( playlist );
+		g_io_channel_shutdown( am_dev, TRUE, NULL );
+		exit( EXIT_FAILURE );
+	}
+	playlist = playlist_new( spool_dir, &error );
+	if( !playlist ){
+		daemon_log(LOG_ERR, "Error loading playlist directory '%s': %s\n", 
+				spool_dir, error->message );
+		g_clear_error( &error );
+		g_io_channel_shutdown( am_dev, TRUE, NULL );
 		exit( EXIT_FAILURE );
 	}
 
@@ -254,7 +255,7 @@ int main( int argc, char *argv[] ){
 
 	/* Main Loop */
 	gboolean empty_playlist_error = FALSE;
-	while( TRUE ){
+	while( running ){
 		file = playlist_next( playlist );
 		if( !file ){
 			if( !empty_playlist_error ){
@@ -282,6 +283,21 @@ int main( int argc, char *argv[] ){
 		 * Decide if this makes sense: Check if the device is gone and
 		 * reopen if necessary.
 		 */
+		g_object_unref( movie );
+		g_free( file );
 	}
-	exit( EXIT_FAILURE );
+
+	/* Cleanup */
+	g_free( device );
+	g_free( spool_dir );
+	playlist_free( playlist );
+	if( daemonized ){
+		if (daemon_pid_file_remove() == -1) {
+			daemon_log(LOG_ERR, "Could not remove pid file (%s).\n",
+					strerror(errno));
+		}
+	}
+	g_io_channel_shutdown( am_dev, TRUE, NULL );
+	g_io_channel_unref( am_dev );
+	return EXIT_SUCCESS;
 }

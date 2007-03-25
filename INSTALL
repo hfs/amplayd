@@ -35,10 +35,11 @@ amplayd - Daemon to play movies on an ARCADEmini
 
 5. Test
 
-   To test the application: Put some .bmls into /var/spool/blinken
+   To test the application without an actual ARCADEmini attached:
 
-   # mknod /dev/am_usb p
-   # netcat -u localhost 2323 < /dev/am_usb
-   # blinkensim [theme]
-   # ./amplayd
+   Put some .bmls into /tmp/blinken
+   $ mknod /tmp/blinken/dev p
+   $ netcat -u localhost 2323 < /tmp/blinken/dev &
+   $ blinkensim [theme] &
+   $ ./amplayd -f -d /tmp/blinken/dev -s /tmp/blinken
 

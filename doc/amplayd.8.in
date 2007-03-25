@@ -29,6 +29,28 @@ Print short help information
 .TP
 .B -V
 Print the daemon's version and exit
+.SH QUEUES
+The daemon manages three different queues, in which movies are sorted depending
+on their filename. All files must end in
+.I .bml
+.TP
+.B priority
+Files in this queue are played first, but only once. Filenames must begin with
+an
+.I underscore
+(_).
+.TP
+.B ordered
+Files in this queue are played in alphanumerical order. Filenames must begin
+with a
+.I digit
+(0--9).
+.TP
+.B random
+Files in this queue are played at random.
+.P
+Priority movies are always played first. After that movies from the priority and
+ordered queues are played alternating and in the ratio of their lengths.
 .SH FILES
 .I @AMPLAYD_DEVICE@
 .RS

@@ -74,9 +74,18 @@ void playlist_remove( Playlist *p, const gchar *file ){
 	GPtrArray *queue = choose_queue( p, file );
 	for( i = 0; i < queue->len; ++i ){
 		if( strcmp( file, g_ptr_array_index( queue, i )) == 0 ){
+			g_free( g_ptr_array_index( queue, i ));
 			g_ptr_array_remove_index( queue, i );
 		}
 	}
+}
+
+void string_array_free( GPtrArray *p ){
+	guint i;
+	for( i = 0; i < p->len; ++i ){
+		g_free( g_ptr_array_index( p, i ));
+	}
+	g_ptr_array_free( p, TRUE );
 }
 
 void playlist_update( Playlist *p ){
@@ -94,7 +103,7 @@ void playlist_update( Playlist *p ){
 
 	/* Compare directory content with last time */
 	if( p->files->len == 0 && contents->len > 0 ){
-		g_ptr_array_free( p->files, TRUE );
+		string_array_free( p->files );
 		p->files = contents;
 		guint i;
 		for( i = 0; i < contents->len; ++i ){
@@ -105,7 +114,7 @@ void playlist_update( Playlist *p ){
 		for( i = 0; i < p->files->len; ++i ){
 			playlist_remove( p, g_ptr_array_index( p->files, i ));
 		}
-		g_ptr_array_free( p->files, TRUE );
+		string_array_free( p->files );
 		p->files = contents;
 	} else if( contents->len == 0 && p->files->len == 0 ){
 	} else {
@@ -132,7 +141,7 @@ void playlist_update( Playlist *p ){
 				++f;
 			}
 		}
-		g_ptr_array_free( p->files, TRUE );
+		string_array_free( p->files );
 		p->files = contents;
 	}
 	playlist_reorder( p );
@@ -140,17 +149,18 @@ void playlist_update( Playlist *p ){
 
 Playlist* playlist_new( const gchar *path, GError **error ) {
 	Playlist *p = g_slice_new( Playlist );
-	p->files = g_ptr_array_new();
-	p->random = g_ptr_array_new();
-	p->sorted = g_ptr_array_new();
-	p->prio = g_ptr_array_new();
-	p->randomPos = p->sortedPos = p->prioPos = 0;
 
 	p->dir = g_dir_open( path, 0, error );
 	if( !p->dir ){
 		playlist_free( p );
 		return NULL;
 	}
+
+	p->files = g_ptr_array_new();
+	p->random = g_ptr_array_new();
+	p->sorted = g_ptr_array_new();
+	p->prio = g_ptr_array_new();
+	p->randomPos = p->sortedPos = p->prioPos = 0;
 
 	playlist_update( p );
 
@@ -161,15 +171,15 @@ void playlist_free( Playlist *p ){
 	if( p->dir ){
 		g_dir_close( p->dir );
 	}
-	g_ptr_array_free( p->files, TRUE );
-	g_ptr_array_free( p->random, TRUE );
-	g_ptr_array_free( p->sorted, TRUE );
-	g_ptr_array_free( p->prio, TRUE );
+	string_array_free( p->files );
+	string_array_free( p->random );
+	string_array_free( p->sorted );
+	string_array_free( p->prio );
 	g_slice_free( Playlist, p );
 	p = NULL;
 }
 
-const gchar* playlist_next( Playlist *p ){
+gchar* playlist_next( Playlist *p ){
 	playlist_update( p );
 
 	/* Play prio queue first */
@@ -179,7 +189,7 @@ const gchar* playlist_next( Playlist *p ){
 	}
 	/* Empty prio queue if played once */
 	if( p->prio->len > 0 && p->prioPos >= p->prio->len ){
-		g_ptr_array_free( p->prio, TRUE );
+		string_array_free( p->prio );
 		p->prio = g_ptr_array_new();
 		p->prioPos = 0;
 	}

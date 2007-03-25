@@ -37,7 +37,7 @@ typedef struct _Playlist {
 } Playlist;
 
 Playlist* playlist_new( const gchar* path, GError **error );
-const gchar* playlist_next();
+gchar* playlist_next();
 void playlist_free( Playlist* p );
 
 #endif
