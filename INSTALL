@@ -9,7 +9,7 @@ amplayd - Daemon to play movies on an ARCADEmini
      [ http://freshmeat.net/projects/blib/ ] and follow their installation
      instructions.
    • cmake. Should come with your distribution, else get it from
-     [ http://www.cmake.org ]
+     [ http://www.cmake.org/ ]
 
 2. Build
 
@@ -36,6 +36,9 @@ amplayd - Daemon to play movies on an ARCADEmini
 5. Test
 
    To test the application without an actual ARCADEmini attached:
+
+   Download and install the blinkensim Blinkenlights simulator from
+   [ http://freshmeat.net/projects/blinkensim/ ]
 
    Put some .bmls into /tmp/blinken
    $ mknod /tmp/blinken/dev p

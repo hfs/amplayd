@@ -49,8 +49,10 @@ with a
 .B random
 Files in this queue are played at random.
 .P
-Priority movies are always played first. After that movies from the priority and
-ordered queues are played alternating and in the ratio of their lengths.
+Priority movies are always played first. After that movies from the random and
+ordered queues are played alternating and evenly distributed over their
+lengths. When all movies have been played, the random queue is reshuffled and
+playing starts all over.
 .SH FILES
 .I @AMPLAYD_DEVICE@
 .RS

@@ -36,7 +36,26 @@ enum {
 	DAEMON_SUCCESS = 1
 };
 
-static gboolean running;
+static gboolean RUNNING;
+
+static void usage( const char* name ){
+	g_printerr( "%s - Daemon to play movies on an ARCADEmini\n", AMPLAYD_NAME );
+	g_printerr( "Usage: %s [OPTIONS]\n", name );
+	g_printerr( "\n" );
+	g_printerr( "Options:\n" );
+	g_printerr( "    -u --user user      Drop privileges to the specified user.\n" );
+	g_printerr( "    -d --device device  Device of the ARCADEmini (default: " AMPLAYD_DEVICE ")\n" );
+	g_printerr( "    -s --spool-dir dir  Playlist directory (default: " AMPLAYD_PLAYLISTDIR ")\n" );
+	g_printerr( "    -f --foreground     Debug mode (run in foreground).\n" );
+	g_printerr( "    -h --help           Prints this help information.\n" );
+	g_printerr( "    -V --version        Prints the daemons version.\n" );
+	g_printerr( "\n" );
+}
+
+static void version(){
+	g_printerr( "%s version %d.%d.%d\n", AMPLAYD_NAME, VERSION_MAJOR,
+			VERSION_MINOR, VERSION_PATCH );
+}
 
 static void daemonize( char* name ){
 	pid_t pid;
@@ -73,31 +92,12 @@ static void daemonize( char* name ){
 	}
 }
 
-static void usage( const char* name ){
-	g_printerr( "%s - Daemon to play movies on an ARCADEmini\n", AMPLAYD_NAME );
-	g_printerr( "Usage: %s [OPTIONS]\n", name );
-	g_printerr( "\n" );
-	g_printerr( "Options:\n" );
-	g_printerr( "    -u --user user      Drop privileges to the specified user.\n" );
-	g_printerr( "    -d --device device  Device of the ARCADEmini (default: " AMPLAYD_DEVICE ")\n" );
-	g_printerr( "    -s --spool-dir dir  Playlist directory (default: " AMPLAYD_PLAYLISTDIR ")\n" );
-	g_printerr( "    -f --foreground     Debug mode (run in foreground).\n" );
-	g_printerr( "    -h --help           Prints this help information.\n" );
-	g_printerr( "    -V --version        Prints the daemons version.\n" );
-	g_printerr( "\n" );
-}
-
-static void version(){
-	g_printerr( "%s version %d.%d.%d\n", AMPLAYD_NAME, VERSION_MAJOR,
-			VERSION_MINOR, VERSION_PATCH );
-}
-
 void signal_handler( int sig ){
 	switch( sig ){
 		case SIGTERM:
 		case SIGINT:
 		case SIGQUIT:
-			running = FALSE;
+			RUNNING = FALSE;
 	}
 }
 
@@ -110,11 +110,11 @@ gboolean play_movie( GIOChannel *output, BMovie *movie, GError **error ){
 
 	BPacket *packet = b_packet_new( movie->width, movie->height,
 			movie->channels, movie->maxval, &size );
-	p_size = b_packet_size( packet );
 	g_return_val_if_fail( packet, FALSE );
+	p_size = b_packet_size( packet );
 	b_packet_hton( packet );
 
-	for( list = movie->frames; list && running; list = list->next ){
+	for( list = movie->frames; list && RUNNING; list = list->next ){
 		gsize bytes_written = 0;
 		BMovieFrame *frame = list->data;
 		memcpy( packet->data, frame->data, size );
@@ -122,6 +122,7 @@ gboolean play_movie( GIOChannel *output, BMovie *movie, GError **error ){
 				p_size , &bytes_written, error );
 		g_return_val_if_fail( status == G_IO_STATUS_NORMAL, FALSE );
 		status = g_io_channel_flush( output, error );
+		g_return_val_if_fail( status == G_IO_STATUS_NORMAL, FALSE );
 		t.tv_sec = frame->duration/1000;
 		t.tv_nsec = frame->duration%1000 * 1000000;
 		nanosleep( &t, NULL );
@@ -131,18 +132,54 @@ gboolean play_movie( GIOChannel *output, BMovie *movie, GError **error ){
 	return TRUE;
 }
 
+void io_channel_open_wait( GIOChannel** channel, gchar* filename, GError** error ){
+	gboolean channel_open_error = FALSE;
+	if( *channel != NULL ){
+		g_io_channel_shutdown( *channel, TRUE, error );
+		g_io_channel_unref( *channel );
+		*channel = NULL;
+	}
+	while( *channel == NULL ){
+		*channel = g_io_channel_new_file( filename, "r+", error );
+		if( *channel != NULL ){
+			break;
+		} else if( !( (*error)->code == G_FILE_ERROR_NOENT ||
+					(*error)->code == G_FILE_ERROR_NXIO )){
+			break;
+		}
+		/* Display error message only once */
+		if( !channel_open_error ){
+			daemon_log(LOG_ERR, "Error opening device '%s': %s\n"
+					"Retrying...",
+					filename, (*error)->message );
+			channel_open_error = TRUE;
+		}
+		g_clear_error( error );
+		sleep( 10 );
+	}
+	if( g_io_channel_set_encoding( *channel, NULL, error )
+			!= G_IO_STATUS_NORMAL ){
+		daemon_log(LOG_ERR, "Can't enable binary mode: %s\n",
+				(*error)->message );
+		g_io_channel_shutdown( *channel, TRUE, NULL );
+		*channel = NULL;
+	}
+	return;
+}
+
 int main( int argc, char *argv[] ){
 	GError *error = NULL;
 	BMovie *movie = NULL;
 	Playlist *playlist = NULL;
 	gchar *device = NULL;
 	gchar *spool_dir = NULL;
-	gchar *file = NULL;
+	const gchar *filename = NULL;
+	gchar *filepath = NULL;
 	GIOStatus status;
 	int o = -1;
 	struct passwd *user = NULL;
 	gboolean daemonized = TRUE;
-	running = TRUE;
+	RUNNING = TRUE;
 
 	/* Command line options */
 	static const struct option long_options[] = {
@@ -200,11 +237,6 @@ int main( int argc, char *argv[] ){
 		daemonize( argv[0] );
 	}
 
-	signal( SIGPIPE, SIG_IGN );
-	signal( SIGTERM, signal_handler );
-	signal( SIGINT, signal_handler );
-	signal( SIGQUIT, signal_handler );
-
 	/* drop privileges */
 	if( user != NULL ){
 		if( chown( daemon_pid_file_proc(), user->pw_uid, user->pw_gid) != 0 ) {
@@ -226,17 +258,12 @@ int main( int argc, char *argv[] ){
 	b_init();
 
 	/* Open playlist and output device */
-	GIOChannel *am_dev = g_io_channel_new_file( device, "r+", &error );
+	GIOChannel *am_dev = NULL;
+	io_channel_open_wait( &am_dev, device, &error );
 	if( !am_dev ){
 		daemon_log(LOG_ERR, "Error opening device '%s': %s\n",
 				device, error->message );
 		g_clear_error( &error );
-		exit( EXIT_FAILURE );
-	}
-	if( g_io_channel_set_encoding( am_dev, NULL, &error ) != G_IO_STATUS_NORMAL ){
-		daemon_log(LOG_ERR, "Can't enable binary mode: %s\n", error->message );
-		g_clear_error( &error );
-		g_io_channel_shutdown( am_dev, TRUE, NULL );
 		exit( EXIT_FAILURE );
 	}
 	playlist = playlist_new( spool_dir, &error );
@@ -248,6 +275,11 @@ int main( int argc, char *argv[] ){
 		exit( EXIT_FAILURE );
 	}
 
+	signal( SIGPIPE, SIG_IGN );
+	signal( SIGTERM, signal_handler );
+	signal( SIGINT, signal_handler );
+	signal( SIGQUIT, signal_handler );
+
 	/* Ok, looks good */
 	if( daemonized ){
 		daemon_retval_send( DAEMON_SUCCESS );
@@ -255,9 +287,9 @@ int main( int argc, char *argv[] ){
 
 	/* Main Loop */
 	gboolean empty_playlist_error = FALSE;
-	while( running ){
-		file = playlist_next( playlist );
-		if( !file ){
+	while( RUNNING ){
+		filename = playlist_next( playlist );
+		if( !filename ){
 			if( !empty_playlist_error ){
 				daemon_log( LOG_ERR, "Playlist is empty. Please "
 						"check %s\n", spool_dir );
@@ -269,27 +301,35 @@ int main( int argc, char *argv[] ){
 		else {
 			empty_playlist_error = FALSE;
 		}
-		file = g_strconcat( spool_dir, "/", file, NULL );
-		movie = b_movie_new_from_file( file, FALSE, &error );
+		filepath = g_strconcat( spool_dir, "/", filename, NULL );
+		movie = b_movie_new_from_file( filepath, FALSE, &error );
 		if( !movie ){
-			daemon_log(LOG_ERR, "Error loading '%s': %s\n",
-					file, error->message );
+			daemon_log( LOG_ERR, "Error loading '%s': %s\n",
+					filepath, error->message );
 			g_clear_error( &error );
 			continue;
 		}
 
-		play_movie( am_dev, movie, &error );
-		/* TODO Check return value
-		 * Decide if this makes sense: Check if the device is gone and
-		 * reopen if necessary.
-		 */
+		if( ! play_movie( am_dev, movie, &error )){
+			if( error ){
+				daemon_log( LOG_ERR, "Error playing '%s': %s\n",
+						filepath, error->message );
+				g_clear_error( &error );
+			}
+			/* Try to reopen the device */
+			io_channel_open_wait( &am_dev, device, &error );
+			if( !am_dev ){
+				daemon_log(LOG_ERR, "Error opening device '%s': %s\n",
+						device, error->message );
+				g_clear_error( &error );
+				exit( EXIT_FAILURE );
+			}
+		}
 		g_object_unref( movie );
-		g_free( file );
+		g_free( filepath );
 	}
 
 	/* Cleanup */
-	g_free( device );
-	g_free( spool_dir );
 	playlist_free( playlist );
 	if( daemonized ){
 		if (daemon_pid_file_remove() == -1) {

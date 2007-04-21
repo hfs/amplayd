@@ -22,25 +22,23 @@
 #include "playlist.h"
 
 #define PLAYLIST_MOVIE_SUFFIX ".bml"
+#define PRIO_QUEUE_PREFIX "_"
 
 void ptr_array_randomize( GPtrArray *a, guint from, guint to ){
-	gpointer tmp;
+	gpointer swap;
 	guint i, j;
 	if( to >= a->len ){
-		to = a->len;
-	}
-	if( from > to ){
-		return;
+		to = a->len - 1;
 	}
 	for( i = from; i <= to; ++i ){
 		j = g_random_int_range( from, to+1 );
-		tmp = g_ptr_array_index( a, j );
+		swap = g_ptr_array_index( a, j );
 		g_ptr_array_index( a, j ) = g_ptr_array_index( a, i );
-		g_ptr_array_index( a, i ) = tmp;
+		g_ptr_array_index( a, i ) = swap;
 	}
 }
 
-/* Sort function for sorting GPtrArrays */
+/* Sort function for sorting GPtrArrays of strings */
 static gint strcmp2(gconstpointer a, gconstpointer b)
 {
 	const char *aa = *(char **) a;
@@ -50,7 +48,9 @@ static gint strcmp2(gconstpointer a, gconstpointer b)
 }
 
 void playlist_reorder( Playlist *p ){
-	ptr_array_randomize( p->random, p->randomPos+1, p->random->len-1 );
+	if( p->random->len > 0 ){
+		ptr_array_randomize( p->random, p->randomPos, p->random->len-1 );
+	}
 	g_ptr_array_sort( p->sorted, strcmp2 );
 }
 
@@ -58,7 +58,7 @@ GPtrArray* choose_queue( Playlist *p, const gchar *file ){
 	if( g_ascii_isdigit( file[0] )){
 		return p->sorted;
 	}
-	if( g_str_has_prefix( file, "_" )){
+	if( g_str_has_prefix( file, PRIO_QUEUE_PREFIX )){
 		return p->prio;
 	}
 	return p->random;
@@ -90,6 +90,7 @@ void string_array_free( GPtrArray *p ){
 
 void playlist_update( Playlist *p ){
 	const gchar *file;
+	gboolean playlist_changed = FALSE;
 	GPtrArray *contents = g_ptr_array_new();
 
 	/* Read current directory content */
@@ -109,6 +110,7 @@ void playlist_update( Playlist *p ){
 		for( i = 0; i < contents->len; ++i ){
 			playlist_add( p, g_ptr_array_index( p->files, i ));
 		}
+		playlist_changed = TRUE;
 	} else if( contents->len == 0 && p->files->len > 0 ){
 		guint i;
 		for( i = 0; i < p->files->len; ++i ){
@@ -116,8 +118,13 @@ void playlist_update( Playlist *p ){
 		}
 		string_array_free( p->files );
 		p->files = contents;
+		playlist_changed = TRUE;
 	} else if( contents->len == 0 && p->files->len == 0 ){
 	} else {
+		/* Put the last known directory content (p->files) next to the
+		 * current state (contents) in two alphanumerically sorted
+		 * columns. Run both down from top to bottom.
+		 */
 		guint c = 0;
 		guint f = 0;
 		int cmp;
@@ -133,9 +140,11 @@ void playlist_update( Playlist *p ){
 			if( cmp < 0 ){
 				playlist_add( p, g_ptr_array_index( contents, c ));
 				++c;
+				playlist_changed = TRUE;
 			} else if( cmp > 0 ){
 				playlist_remove( p, g_ptr_array_index( p->files, f ));
 				++f;
+				playlist_changed = TRUE;
 			} else {
 				++c;
 				++f;
@@ -144,7 +153,9 @@ void playlist_update( Playlist *p ){
 		string_array_free( p->files );
 		p->files = contents;
 	}
-	playlist_reorder( p );
+	if( playlist_changed ){
+		playlist_reorder( p );
+	}
 }
 
 Playlist* playlist_new( const gchar *path, GError **error ) {
@@ -179,7 +190,7 @@ void playlist_free( Playlist *p ){
 	p = NULL;
 }
 
-gchar* playlist_next( Playlist *p ){
+const gchar* playlist_next( Playlist *p ){
 	playlist_update( p );
 
 	/* Play prio queue first */
@@ -187,14 +198,14 @@ gchar* playlist_next( Playlist *p ){
 		++p->prioPos;
 		return g_ptr_array_index( p->prio, p->prioPos-1 );
 	}
-	/* Empty prio queue if played once */
+	/* Empty prio queue when played once */
 	if( p->prio->len > 0 && p->prioPos >= p->prio->len ){
 		string_array_free( p->prio );
 		p->prio = g_ptr_array_new();
 		p->prioPos = 0;
 	}
 
-	/* Anything to play? */
+	/* Anything to play at all? */
 	if( p->prio->len <= 0 && p->sorted->len <= 0 && p->random->len <= 0 ){
 		return NULL;
 	}
@@ -202,15 +213,16 @@ gchar* playlist_next( Playlist *p ){
 	/* All queues played -> reorder */
 	if( p->sortedPos >= p->sorted->len &&
 			p->randomPos >= p->random->len ){
-		p->randomPos = -1;
+		p->randomPos = 0;
 		p->sortedPos = 0;
 		playlist_reorder( p );
-		p->randomPos = 0;
 	}
 
 	/*  Play sorted and random queues fairly */
-	if( p->sortedPos < p->sorted->len &&
-			p->sortedPos * p->random->len < p->randomPos * p->sorted->len ){
+	if( p->sortedPos < p->sorted->len && ( p->random->len <= 0 ||
+			(p->sortedPos+1) * p->random->len <
+			(p->randomPos+1) * p->sorted->len )
+	){
 		++p->sortedPos;
 		return g_ptr_array_index( p->sorted, p->sortedPos-1 );
 	}

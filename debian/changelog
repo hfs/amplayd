@@ -1,3 +1,13 @@
+amplayd (0.1.5-1) unstable; urgency=low
+
+  * If the device does not exist, retry instead of giving up. If the device
+    does not exist on startup, the daemon waits and tries to open it every few
+    seconds. If the device disappears during operation, it should now be
+    reopened.
+  * Corrects a bunch of errors in the playlist management.
+
+ -- Hermann Schwarting <debian@knackich.de>  Sat, 21 Apr 2007 23:57:29 +0200
+
 amplayd (0.1.4-1) unstable; urgency=low
 
   * Sane memory management
