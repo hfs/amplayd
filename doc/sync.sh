@@ -20,7 +20,7 @@ wget --mirror --no-parent --no-directories --accept index.html,.$SUFF \
 	$SOURCE || exit 1
 [ -e index.html ] || exit 2
 for each in *.$SUFF; do
-	if ! grep -q "HREF=\"$each\"" index.html; then
+	if ! grep -i -q "href=\"$each\"" index.html; then
 		rm -f $each
 	fi
 done
